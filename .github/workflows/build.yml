@@ -1,0 +1,35 @@
+name: Firmware derle
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+
+      - name: PlatformIO kur
+        run: pip install platformio
+
+      - name: Derle (iki surum: vspi ve hspi)
+        run: pio run
+
+      - name: Boyutu goster
+        run: ls -l firmware_merged_*.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ucak-radar-firmware
+          path: firmware_merged_*.bin
