@@ -14,25 +14,24 @@ Veri: [airplanes.live](https://airplanes.live) (yedek: adsb.lol) – ücretsiz, 
 | RST    | GPIO0    |
 | VCC/GND| 3V3/GND  |
 
-Farklı pin istersen `platformio.ini` içindeki `-DTFT_*` değerlerini değiştir.
+Farklı pin istersen `platformio.ini` içindeki `-DPIN_*` değerlerini değiştir.
 
 ## 2) `.bin` dosyasını elde etme
 
 **A) GitHub ile (kurulum gerektirmez):** Bu klasörü yeni bir GitHub deposuna yükle →
-**Actions** sekmesi → son çalışma → **Artifacts** → `ucak-radar-firmware` → içinden `firmware_merged_esp32c3_vspi.bin`.
+**Actions** sekmesi → son çalışma → **Artifacts** → `ucak-radar-firmware` → içinden `firmware_merged_esp32c3.bin`.
 
 **B) Kendi bilgisayarında:**
 ```
 pip install platformio
 pio run
 ```
-Çıktı proje klasöründe: `firmware_merged_esp32c3_vspi.bin` ve `firmware_merged_esp32c3_hspi.bin`
-(önce `vspi` olanı dene; çöküyorsa ya da ekran boşsa `hspi` olanı dene).
+Çıktı proje klasöründe: `firmware_merged_esp32c3.bin`
 
 ## 3) ESP32-C3'e yükleme (tek dosya, 0x0 adresine)
 
-* **Tarayıcıdan:** Chrome/Edge ile <https://web.esphome.io> → cihazı USB ile bağla → *Connect* → *Install* → `firmware_merged_esp32c3_vspi.bin` seç.
-* **Komut satırı:** `esptool.py --chip esp32c3 --port COM5 write_flash 0x0 firmware_merged_esp32c3_vspi.bin`
+* **Tarayıcıdan:** Chrome/Edge ile <https://web.esphome.io> → cihazı USB ile bağla → *Connect* → *Install* → `firmware_merged_esp32c3.bin` seç.
+* **Komut satırı:** `esptool.py --chip esp32c3 --port COM5 write_flash 0x0 firmware_merged_esp32c3.bin`
 
 Port görünmezse BOOT tuşuna basılı tutarak USB'yi tak.
 
@@ -49,5 +48,5 @@ Port görünmezse BOOT tuşuna basılı tutarak USB'yi tak.
 
 * Ekran 2 Hz yenilenir; veri 5 sn'de bir çekilir, aradaki karelerde uçaklar hız ve yöne göre ilerletilir.
 * Yerdeki uçaklar gösterilmez. En fazla 60 uçak çizilir.
-* Renkler ters/yanlışsa `platformio.ini` içindeki `TFT_INVERSION_ON` veya `TFT_RGB_ORDER` satırını aç.
+* Renkler ters görünürse `platformio.ini` içinde `-DLCD_INVERT=true` değerini `false` yap (ya da tersi).
 * HTTPS sertifikası doğrulanmaz (`setInsecure`); sadece herkese açık uçuş verisi çekilir, şifre gönderilmez.

@@ -15,7 +15,8 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
-#include <TFT_eSPI.h>
+#define LGFX_USE_V1
+#include <LovyanGFX.hpp>
 #include <math.h>
 
 #include "stream_util.h"
@@ -55,8 +56,63 @@ static SemaphoreHandle_t acMutex;
 
 static WebServer server(80);
 static DNSServer dns;
-static TFT_eSPI tft = TFT_eSPI();
-static TFT_eSprite spr = TFT_eSprite(&tft);
+// GC9A01 ekran tanimi (pinler platformio.ini'deki -DPIN_* bayraklarindan gelir)
+#ifndef LCD_INVERT
+#define LCD_INVERT true
+#endif
+
+class LGFX : public lgfx::LGFX_Device {
+  lgfx::Panel_GC9A01 _panel;
+  lgfx::Bus_SPI _bus;
+
+ public:
+  LGFX() {
+    {
+      auto c = _bus.config();
+      c.spi_host = SPI2_HOST;
+      c.spi_mode = 0;
+      c.freq_write = 40000000;
+      c.freq_read = 16000000;
+      c.spi_3wire = true;
+      c.use_lock = true;
+      c.dma_channel = SPI_DMA_CH_AUTO;
+      c.pin_sclk = PIN_SCLK;
+      c.pin_mosi = PIN_MOSI;
+      c.pin_miso = -1;
+      c.pin_dc = PIN_DC;
+      _bus.config(c);
+      _panel.setBus(&_bus);
+    }
+    {
+      auto c = _panel.config();
+      c.pin_cs = PIN_CS;
+      c.pin_rst = PIN_RST;
+      c.pin_busy = -1;
+      c.panel_width = 240;
+      c.panel_height = 240;
+      c.offset_x = 0;
+      c.offset_y = 0;
+      c.readable = false;
+      c.invert = LCD_INVERT;
+      c.rgb_order = false;
+      c.dlen_16bit = false;
+      c.bus_shared = false;
+      _panel.config(c);
+    }
+    setPanel(&_panel);
+  }
+};
+
+static LGFX tft;
+static LGFX_Sprite spr(&tft);
+
+// Metni (cx, cy) merkezli cizer
+static void drawCentered(const char* s, int cx, int cy, uint16_t color) {
+  spr.setTextColor(color);
+  int w = spr.textWidth(s);
+  int h = spr.fontHeight();
+  spr.drawString(s, cx - w / 2, cy - h / 2);
+}
 static bool sprOk = false;
 
 static uint32_t restartAt = 0;
@@ -229,11 +285,9 @@ static void drawScreen(const String* lines, const uint16_t* colors, int n) {
   if (!sprOk) return;
   spr.fillSprite(C_BG);
   spr.setTextFont(2);
-  spr.setTextDatum(MC_DATUM);
   int y0 = CY - (n - 1) * 11;
   for (int i = 0; i < n; i++) {
-    spr.setTextColor(colors[i]);
-    spr.drawString(lines[i], CX, y0 + i * 22);
+    drawCentered(lines[i].c_str(), CX, y0 + i * 22, colors[i]);
   }
   spr.pushSprite(0, 0);
 }
@@ -279,9 +333,7 @@ static void drawRadar() {
   spr.drawLine(CX - RAD, CY, CX + RAD, CY, C_AXIS);
   spr.drawLine(CX, CY - RAD, CX, CY + RAD, C_AXIS);
   spr.setTextFont(1);
-  spr.setTextDatum(MC_DATUM);
-  spr.setTextColor(C_DIM);
-  spr.drawString("N", CX, 10);
+  drawCentered("N", CX, 10, C_DIM);
   spr.fillCircle(CX, CY, 2, C_CENTER);
 
   // Ucaklar (hiz/yone gore ara konum)
@@ -298,14 +350,12 @@ static void drawRadar() {
     int py = CY - lroundf(y * k);
     drawPlane(px, py, local[i].hdg, C_PLANE);
 
-    int tw = strlen(local[i].id) * 6;
+    int tw = spr.textWidth(local[i].id);
     int lx = px;
     if (lx < tw / 2 + 4) lx = tw / 2 + 4;
     if (lx > 236 - tw / 2) lx = 236 - tw / 2;
     int ly = (py < 205) ? py + 15 : py - 15;
-    spr.setTextDatum(MC_DATUM);
-    spr.setTextColor(C_LABEL);
-    spr.drawString(local[i].id, lx, ly);
+    drawCentered(local[i].id, lx, ly, C_LABEL);
     shown++;
   }
 
@@ -313,14 +363,12 @@ static void drawRadar() {
   char t[40];
   bool stale = (millis() - stamp) > 20000;
   if (stale) {
-    spr.setTextColor(C_ERR);
     snprintf(t, sizeof(t), "baglanti sorunu");
+    drawCentered(t, CX, 228, C_ERR);
   } else {
-    spr.setTextColor(C_OK);
     snprintf(t, sizeof(t), "%d ucak  %d km", shown, (int)lroundf(R));
+    drawCentered(t, CX, 228, C_OK);
   }
-  spr.setTextDatum(MC_DATUM);
-  spr.drawString(t, CX, 228);
 
   spr.pushSprite(0, 0);
 }
@@ -596,7 +644,7 @@ void setup() {
   tft.init();
   Serial.println("2) ekran tamam");
   tft.setRotation(0);
-  tft.fillScreen(TFT_BLACK);
+  tft.fillScreen(0);
   spr.setColorDepth(8);
   sprOk = spr.createSprite(240, 240) != nullptr;
   Serial.println(sprOk ? "3) sprite tamam" : "3) Sprite olusturulamadi (bellek)");
