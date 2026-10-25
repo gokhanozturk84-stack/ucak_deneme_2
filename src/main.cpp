@@ -7,6 +7,7 @@
 //  * Ekran saniyede 2 kez yenilenir; ucaklar hiz/yone gore ara konumlandirilir
 
 #include <Arduino.h>
+#include <esp_system.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -116,6 +117,26 @@ static void drawCentered(const char* s, int cx, int cy, uint16_t color) {
 static bool sprOk = false;
 
 static uint32_t restartAt = 0;
+
+// Bulunan WiFi aglari (acilista bir kez taranir; AP calisirken tarama yayini bozar)
+static String scanList[16];
+static int scanCount = 0;
+static uint32_t rescanAt = 0;
+
+static void doScan() {
+  int n = WiFi.scanNetworks(false, false);
+  scanCount = 0;
+  for (int i = 0; i < n && scanCount < 16; i++) {
+    String ss = WiFi.SSID(i);
+    if (ss.isEmpty()) continue;
+    bool dup = false;
+    for (int j = 0; j < scanCount; j++) {
+      if (scanList[j] == ss) { dup = true; break; }
+    }
+    if (!dup) scanList[scanCount++] = ss;
+  }
+  WiFi.scanDelete();
+}
 
 // Renkler (RGB565)
 static inline uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -467,7 +488,7 @@ main{max-width:460px;margin:0 auto;padding:20px 16px 40px}
 h1{font-size:22px;margin:0 0 4px;color:#7dffa8}
 .st{font-size:13px;color:#8fb9a0;margin-bottom:18px;line-height:1.5}
 label{display:block;margin:14px 0 4px;font-size:14px;color:#a9d6b8}
-input{box-sizing:border-box;width:100%;padding:11px;border-radius:8px;border:1px solid #2a4a38;background:#10201a;color:#eafff0;font-size:16px}
+input,select{box-sizing:border-box;width:100%;padding:11px;border-radius:8px;border:1px solid #2a4a38;background:#10201a;color:#eafff0;font-size:16px}
 .row{display:flex;gap:10px}.row>div{flex:1}
 button{margin-top:10px;padding:12px 16px;border:0;border-radius:8px;background:#2fbf6b;color:#04140a;font-size:16px;font-weight:600}
 button.sec{background:#1d3a2b;color:#bff0d0;font-size:14px;padding:8px 12px;margin-top:6px}
@@ -505,10 +526,20 @@ static void handleRoot() {
   b += F("</div>");
 
   b += F("<form method=post action=/save>");
-  b += F("<label>Ev WiFi ağ adı</label><input name=ssid list=ag maxlength=32 required autocomplete=off value=\"");
+  b += F("<label>Bulunan WiFi ağları</label><select id=sl onchange=sec(this)><option value=''>");
+  b += scanCount ? F("— listeden bir ağ seçin —") : F("— ağ bulunamadı —");
+  b += F("</option>");
+  for (int i = 0; i < scanCount; i++) {
+    b += F("<option>");
+    b += htmlEscape(scanList[i]);
+    b += F("</option>");
+  }
+  b += F("</select>");
+  b += F("<button type=button class=sec onclick=yeni()>Ağları yeniden tara</button>"
+         "<small id=tm>Yeniden tarama sırasında bağlantı birkaç saniye kopabilir.</small>");
+  b += F("<label>Ev WiFi ağ adı</label><input name=ssid maxlength=32 required autocomplete=off value=\"");
   b += htmlEscape(cfg.ssid);
-  b += F("\"><datalist id=ag></datalist>");
-  b += F("<button type=button class=sec id=tb onclick=tara()>Ağları tara</button><small id=tm></small>");
+  b += F("\">");
   b += F("<label>WiFi şifresi</label><input name=pass type=password maxlength=63 autocomplete=off placeholder=\"");
   b += cfg.ssid.length() ? F("(değiştirmek için doldurun)") : F("şifre (açık ağsa boş bırakın)");
   b += F("\">");
@@ -522,39 +553,16 @@ static void handleRoot() {
   b += String(cfg.radiusKm, 0);
   b += F("\"><small>1 – 400 km. Küçük yarıçap daha ayrıntılı gösterir.</small>");
   b += F("<button class=main type=submit>Kaydet ve yeniden başlat</button></form>");
-  b += F("<script>async function tara(){const b=document.getElementById('tb'),m=document.getElementById('tm');"
-         "b.disabled=true;b.textContent='Taranıyor...';"
-         "try{for(let i=0;i<10;i++){const r=await fetch('/scan');const j=await r.json();"
-         "if(j.done){const d=document.getElementById('ag');d.innerHTML='';"
-         "j.nets.forEach(n=>{const o=document.createElement('option');o.value=n;d.appendChild(o)});"
-         "m.textContent=j.nets.length+' ağ bulundu. Ağ adı alanına dokunup seçin.';break}"
-         "await new Promise(r=>setTimeout(r,1500))}}catch(e){m.textContent='Tarama başarısız'}"
-         "b.disabled=false;b.textContent='Ağları tara'}</script>");
+  b += F("<script>function sec(x){if(x.value)document.getElementsByName('ssid')[0].value=x.value}"
+         "function yeni(){document.getElementById('tm').textContent="
+         "'Taranıyor... bağlantı kopabilir. 12 sn sonra sayfa yenilenecek; açılmazsa WiFi ağına yeniden bağlanıp sayfayı yenileyin.';"
+         "fetch('/rescan').catch(function(){});setTimeout(function(){location.reload()},12000)}</script>");
   sendPage(b);
 }
 
-static void handleScan() {
-  int n = WiFi.scanComplete();
-  if (n == WIFI_SCAN_FAILED) {
-    WiFi.scanNetworks(true);
-    server.send(200, "application/json", "{\"done\":false}");
-    return;
-  }
-  if (n == WIFI_SCAN_RUNNING) {
-    server.send(200, "application/json", "{\"done\":false}");
-    return;
-  }
-  JsonDocument d;
-  d["done"] = true;
-  JsonArray a = d["nets"].to<JsonArray>();
-  for (int i = 0; i < n; i++) {
-    String s = WiFi.SSID(i);
-    if (s.length()) a.add(s);
-  }
-  WiFi.scanDelete();
-  String out;
-  serializeJson(d, out);
-  server.send(200, "application/json", out);
+static void handleRescan() {
+  rescanAt = millis() + 800;   // tarama ana dongude, yanit gittikten sonra yapilir
+  server.send(200, "text/plain", "ok");
 }
 
 static void handleSave() {
@@ -650,8 +658,22 @@ void setup() {
   Serial.println(sprOk ? "3) sprite tamam" : "3) Sprite olusturulamadi (bellek)");
 
   Serial.println("4) WiFi AP baslatiliyor");
+  Serial.printf("Reset nedeni: %d (1=guc, 3=yazilim, 4=cokme, 5/6=watchdog, 9=brownout)\n",
+                (int)esp_reset_reason());
   WiFi.persistent(false);
   WiFi.setHostname("ucakradar");
+
+  // Once (AP acilmadan) cevredeki aglari tara
+  {
+    String L[2] = {"UCAK RADAR", "WiFi aglari taraniyor..."};
+    uint16_t C[2] = {C_CENTER, C_PLANE};
+    drawScreen(L, C, 2);
+  }
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  doScan();
+  Serial.printf("Bulunan ag sayisi: %d\n", scanCount);
+
   WiFi.mode(WIFI_AP_STA);
   delay(100);
   // Bazi ESP32-C3 SuperMini kartlari yuksek verici gucunde calismaz: gucu dusur
@@ -666,7 +688,7 @@ void setup() {
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
-  server.on("/scan", HTTP_GET, handleScan);
+  server.on("/rescan", HTTP_GET, handleRescan);
   server.onNotFound(handleNotFound);
   server.begin();
 
@@ -677,6 +699,10 @@ void setup() {
 void loop() {
   uint32_t t0 = millis();
   wifiManage();
+  if (rescanAt && millis() > rescanAt) {
+    rescanAt = 0;
+    doScan();
+  }
   renderFrame();
   while (millis() - t0 < FRAME_MS) {
     server.handleClient();
