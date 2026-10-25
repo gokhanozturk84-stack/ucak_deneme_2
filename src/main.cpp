@@ -29,7 +29,7 @@ static const uint32_t FETCH_INTERVAL_MS = 5000;          // veri cekme araligi
 static const uint32_t FRAME_MS          = 500;           // ekran yenileme (2 Hz)
 static const int      MAX_AC            = 60;            // en fazla ucak sayisi
 static const int      RESET_PIN         = 9;             // BOOT dugmesi: 5 sn bas = ayarlari sil
-static const char*    HOSTS[2]          = {"api.airplanes.live", "api.adsb.lol"};
+static const char*    HOSTS[2]          = {"api.adsb.lol", "api.airplanes.live"};
 
 // Ekran geometrisi
 static const int CX = 120, CY = 120, RAD = 104;
@@ -178,6 +178,7 @@ struct NetReader {
   }
 };
 
+static char netStatus[40] = "";   // ekranda gosterilen son veri durumu
 static JsonDocument jsonFilter;
 static char objBuf[1800];
 static Aircraft tmpList[MAX_AC];
@@ -202,20 +203,39 @@ static bool fetchFrom(const char* host, int nm) {
   char url[160];
   snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%d", host, cfg.lat, cfg.lon, nm);
 
+  const char* shortHost = strstr(host, "airplanes") ? "airplanes" : "adsb.lol";
+  Serial.printf("fetch %s heap=%u max=%u\n", host, (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
+
   HTTPClient http;
+  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   http.useHTTP10(true);              // chunked cevaptan kacin
   http.setConnectTimeout(6000);
   http.setTimeout(8000);
   http.setUserAgent("UcakRadar-ESP32C3/1.0");
-  if (!http.begin(client, String(url))) return false;
+  if (!http.begin(client, String(url))) {
+    snprintf(netStatus, sizeof(netStatus), "%s: begin hata", shortHost);
+    return false;
+  }
 
   int code = http.GET();
-  if (code != 200) { http.end(); return false; }
+  if (code != 200) {
+    String why = code < 0 ? HTTPClient::errorToString(code) : String("");
+    snprintf(netStatus, sizeof(netStatus), "%s: %d %.18s", shortHost, code, why.c_str());
+    Serial.printf("HTTP hata: %s\n", netStatus);
+    http.end();
+    return false;
+  }
   const uint32_t tData = millis();
 
   NetReader rd;
   rd.s = http.getStreamPtr();
-  if (!skipTo(rd, "\"ac\":")) { http.end(); return false; }
+  if (!skipTo(rd, "\"ac\":")) {
+    snprintf(netStatus, sizeof(netStatus), "%s: veri formati", shortHost);
+    Serial.println("ac alani bulunamadi");
+    http.end();
+    return false;
+  }
 
   const double cosLat = cos(cfg.lat * DEG_TO_RAD);
   int n = 0;
@@ -276,6 +296,8 @@ static bool fetchFrom(const char* host, int nm) {
   acCount = n;
   acStamp = tData;
   xSemaphoreGive(acMutex);
+  snprintf(netStatus, sizeof(netStatus), "%s: %d ucak", shortHost, n);
+  Serial.printf("Veri alindi: %s\n", netStatus);
   return true;
 }
 
@@ -423,7 +445,9 @@ static void renderFrame() {
     L[1] = "Veri bekleniyor...";         C[1] = C_PLANE;
     L[2] = WiFi.localIP().toString();    C[2] = C_LABEL;
     L[3] = "ucakradar.local";            C[3] = C_DIM;
-    drawScreen(L, C, 4);
+    int nl = 4;
+    if (netStatus[0]) { L[4] = netStatus; C[4] = C_ERR; nl = 5; }
+    drawScreen(L, C, nl);
     return;
   }
   drawRadar();
