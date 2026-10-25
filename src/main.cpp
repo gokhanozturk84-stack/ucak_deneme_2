@@ -29,7 +29,18 @@ static const uint32_t FETCH_INTERVAL_MS = 5000;          // veri cekme araligi
 static const uint32_t FRAME_MS          = 500;           // ekran yenileme (2 Hz)
 static const int      MAX_AC            = 60;            // en fazla ucak sayisi
 static const int      RESET_PIN         = 9;             // BOOT dugmesi: 5 sn bas = ayarlari sil
-static const char*    HOSTS[2]          = {"api.adsb.lol", "api.airplanes.live"};
+#define FW_VERSION "v6-http11"
+
+struct Provider {
+  const char* name;
+  const char* urlFmt;   // %.4f enlem, %.4f boylam, %d yaricap (deniz mili)
+  const char* arrayKey; // JSON'da ucak dizisinin anahtari
+};
+static const Provider PROVIDERS[3] = {
+  {"adsb.lol",   "https://api.adsb.lol/v2/point/%.4f/%.4f/%d",                 "\"ac\":"},
+  {"adsb.fi",    "https://opendata.adsb.fi/api/v2/lat/%.4f/lon/%.4f/dist/%d",  "\"aircraft\":"},
+  {"airplanes",  "https://api.airplanes.live/v2/point/%.4f/%.4f/%d",           "\"ac\":"},
+};
 
 // Ekran geometrisi
 static const int CX = 120, CY = 120, RAD = 104;
@@ -201,15 +212,15 @@ static void initFilter() {
   jsonFilter["seen_pos"]     = true;
 }
 
-static bool fetchFrom(const char* host, int nm) {
+static bool fetchFrom(const Provider& pv, int nm) {
   WiFiClientSecure client;
   client.setInsecure();   // sertifika dogrulamasi yok (bellek/basitlik icin)
 
   char url[160];
-  snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%d", host, cfg.lat, cfg.lon, nm);
+  snprintf(url, sizeof(url), pv.urlFmt, cfg.lat, cfg.lon, nm);
 
-  const char* shortHost = strstr(host, "airplanes") ? "airplanes" : "adsb.lol";
-  Serial.printf("fetch %s heap=%u max=%u\n", host, (unsigned)ESP.getFreeHeap(),
+  const char* shortHost = pv.name;
+  Serial.printf("fetch %s heap=%u max=%u\n", url, (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
 
   HTTPClient http;
@@ -242,7 +253,7 @@ static bool fetchFrom(const char* host, int nm) {
   BodyReader<NetSource> rd;
   rd.s = &src;
   rd.chunked = http.header("Transfer-Encoding").indexOf("chunked") >= 0;
-  if (!skipTo(rd, "\"ac\":")) {
+  if (!skipTo(rd, pv.arrayKey)) {
     snprintf(netStatus, sizeof(netStatus), "%s: veri formati", shortHost);
     Serial.println("ac alani bulunamadi");
     http.end();
@@ -325,9 +336,9 @@ static void netTask(void*) {
         int nm = (int)ceilf(cfg.radiusKm / 1.852f);
         if (nm < 1) nm = 1;
         if (nm > 250) nm = 250;
-        if (!fetchFrom(HOSTS[hostIdx], nm)) {
-          Serial.printf("Veri alinamadi: %s\n", HOSTS[hostIdx]);
-          hostIdx = (hostIdx + 1) % 2;   // yedek sunucuya gec
+        if (!fetchFrom(PROVIDERS[hostIdx], nm)) {
+          Serial.printf("Veri alinamadi: %s\n", PROVIDERS[hostIdx].name);
+          hostIdx = (hostIdx + 1) % 3;   // siradaki kaynaga gec
         }
       }
     }
@@ -459,6 +470,7 @@ static void renderFrame() {
     L[3] = "ucakradar.local";            C[3] = C_DIM;
     int nl = 4;
     if (netStatus[0]) { L[4] = netStatus; C[4] = C_ERR; nl = 5; }
+    L[nl] = FW_VERSION; C[nl] = C_DIM; nl++;
     drawScreen(L, C, nl);
     return;
   }
@@ -694,6 +706,7 @@ void setup() {
   Serial.println(sprOk ? "3) sprite tamam" : "3) Sprite olusturulamadi (bellek)");
 
   Serial.println("4) WiFi AP baslatiliyor");
+  Serial.println("Surum: " FW_VERSION);
   Serial.printf("Reset nedeni: %d (1=guc, 3=yazilim, 4=cokme, 5/6=watchdog, 9=brownout)\n",
                 (int)esp_reset_reason());
   WiFi.persistent(false);
