@@ -23,7 +23,7 @@ jobs:
       - name: PlatformIO kur
         run: pip install platformio
 
-      - name: Derle (iki surum: vspi ve hspi)
+      - name: Derle
         run: pio run
 
       - name: Boyutu goster
