@@ -159,22 +159,27 @@ static void loadConfig() {
 }
 
 // ======================= Ucak verisi (HTTPS akis ayristirma) =======================
-struct NetReader {
-  WiFiClient* s;
-  uint8_t b[512];
-  int pos = 0, len = 0;
-  int get() {
-    if (pos >= len) {
-      uint32_t t = millis();
-      for (;;) {
-        int n = s->read(b, sizeof(b));
-        if (n > 0) { len = n; pos = 0; break; }
-        if (!s->connected() && !s->available()) return -1;
-        if (millis() - t > 6000) return -1;
-        delay(2);
-      }
+struct NetSource {
+  WiFiClient* c = nullptr;
+  int read1() {
+    uint32_t t = millis();
+    for (;;) {
+      int x = c->read();
+      if (x >= 0) return x;
+      if (!c->connected() && !c->available()) return -1;
+      if (millis() - t > 6000) return -1;
+      delay(2);
     }
-    return b[pos++];
+  }
+  int readBlock(uint8_t* b, int n) {
+    uint32_t t = millis();
+    for (;;) {
+      int k = c->read(b, n);
+      if (k > 0) return k;
+      if (!c->connected() && !c->available()) return -1;
+      if (millis() - t > 6000) return -1;
+      delay(2);
+    }
   }
 };
 
@@ -209,10 +214,14 @@ static bool fetchFrom(const char* host, int nm) {
 
   HTTPClient http;
   http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-  http.useHTTP10(true);              // chunked cevaptan kacin
+  http.setReuse(false);              // "Connection: close"
   http.setConnectTimeout(6000);
   http.setTimeout(8000);
-  http.setUserAgent("UcakRadar-ESP32C3/1.0");
+  http.setUserAgent("Mozilla/5.0 (compatible; UcakRadar-ESP32C3/1.0)");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("Accept-Encoding", "identity");   // sikistirma isteme
+  const char* wantHeaders[] = {"Transfer-Encoding"};
+  http.collectHeaders(wantHeaders, 1);
   if (!http.begin(client, String(url))) {
     snprintf(netStatus, sizeof(netStatus), "%s: begin hata", shortHost);
     return false;
@@ -228,8 +237,11 @@ static bool fetchFrom(const char* host, int nm) {
   }
   const uint32_t tData = millis();
 
-  NetReader rd;
-  rd.s = http.getStreamPtr();
+  NetSource src;
+  src.c = http.getStreamPtr();
+  BodyReader<NetSource> rd;
+  rd.s = &src;
+  rd.chunked = http.header("Transfer-Encoding").indexOf("chunked") >= 0;
   if (!skipTo(rd, "\"ac\":")) {
     snprintf(netStatus, sizeof(netStatus), "%s: veri formati", shortHost);
     Serial.println("ac alani bulunamadi");
