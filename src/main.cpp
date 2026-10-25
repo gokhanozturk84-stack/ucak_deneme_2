@@ -653,8 +653,15 @@ void setup() {
   WiFi.persistent(false);
   WiFi.setHostname("ucakradar");
   WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(AP_SSID, AP_PASS);
+  delay(100);
+  // Bazi ESP32-C3 SuperMini kartlari yuksek verici gucunde calismaz: gucu dusur
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  bool apOk = WiFi.softAP(AP_SSID, AP_PASS, 1, 0, 4);   // kanal 1, gizli degil, 4 istemci
+  delay(100);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.setSleep(false);
+  Serial.printf("AP baslatildi: %s, ssid=%s, ip=%s\n", apOk ? "evet" : "HAYIR", AP_SSID,
+                WiFi.softAPIP().toString().c_str());
   dns.start(53, "*", WiFi.softAPIP());
 
   server.on("/", HTTP_GET, handleRoot);
