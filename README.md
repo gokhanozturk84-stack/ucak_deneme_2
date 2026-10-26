@@ -47,6 +47,7 @@ Port görünmezse BOOT tuşuna basılı tutarak USB'yi tak.
 ## Notlar
 
 * Ekran 2 Hz yenilenir; veri 5 sn'de bir çekilir, aradaki karelerde uçaklar hız ve yöne göre ilerletilir.
+* Uçak simgesinin rengi irtifayı gösterir: kırmızı/turuncu (alçak) → sarı → yeşil → camgöbeği → mavi (yüksek, 40.000 ft ve üstü). İrtifası bilinmeyenler gridir. Ekranın altındaki renk skalası bunu gösterir.
 * Yerdeki uçaklar gösterilmez. En fazla 60 uçak çizilir.
 * Renkler ters görünürse `platformio.ini` içinde `-DLCD_INVERT=true` değerini `false` yap (ya da tersi).
 * HTTPS sertifikası doğrulanmaz (`setInsecure`); sadece herkese açık uçuş verisi çekilir, şifre gönderilmez.

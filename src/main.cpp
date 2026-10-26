@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include "stream_util.h"
+#include "alt_color.h"
 
 // ======================= Ayarlanabilir sabitler =======================
 static const char*    AP_SSID           = "UcakRadar";
@@ -29,7 +30,7 @@ static const uint32_t FETCH_INTERVAL_MS = 5000;          // veri cekme araligi
 static const uint32_t FRAME_MS          = 500;           // ekran yenileme (2 Hz)
 static const int      MAX_AC            = 60;            // en fazla ucak sayisi
 static const int      RESET_PIN         = 9;             // BOOT dugmesi: 5 sn bas = ayarlari sil
-#define FW_VERSION "v6-http11"
+#define FW_VERSION "v8-koyu-acik"
 
 struct Provider {
   const char* name;
@@ -60,6 +61,7 @@ struct Aircraft {
   float dx, dy;   // merkeze gore km (dogu, kuzey) - veri zamaninda
   float vE, vN;   // km/sn
   float hdg;      // derece
+  int32_t altFt;  // irtifa (feet), bilinmiyorsa ALT_UNKNOWN
 };
 static Aircraft acList[MAX_AC];
 static int acCount = 0;
@@ -209,6 +211,7 @@ static void initFilter() {
   jsonFilter["true_heading"] = true;
   jsonFilter["mag_heading"]  = true;
   jsonFilter["alt_baro"]     = true;
+  jsonFilter["alt_geom"]     = true;
   jsonFilter["seen_pos"]     = true;
 }
 
@@ -308,6 +311,9 @@ static bool fetchFrom(const Provider& pv, int nm) {
       a.vN = v * cosf(hdg * DEG_TO_RAD);
     }
     a.hdg = hdg >= 0 ? hdg : 0;
+    a.altFt = ALT_UNKNOWN;
+    if (doc["alt_baro"].is<double>()) a.altFt = (int32_t)doc["alt_baro"].as<double>();
+    else if (doc["alt_geom"].is<double>()) a.altFt = (int32_t)doc["alt_geom"].as<double>();
     a.dx = east + a.vE * sp;
     a.dy = north + a.vN * sp;
     n++;
@@ -402,6 +408,15 @@ static void drawRadar() {
   drawCentered("N", CX, 10, C_DIM);
   spr.fillCircle(CX, CY, 2, C_CENTER);
 
+  // Irtifa renk skalasi (ucaklardan once cizilir, ucaklar ustte kalir)
+  for (int x = 80; x < 160; x++) {
+    spr.drawFastVLine(x, 212, 4, altColor((x - 80) * ALT_MAX_FT / 79));
+  }
+  spr.setTextFont(1);
+  spr.setTextColor(C_DIM);
+  spr.drawString("0", 70, 211);
+  spr.drawString("40k", 164, 211);
+
   // Ucaklar (hiz/yone gore ara konum)
   float dt = (millis() - stamp) / 1000.0f;
   if (dt > 60) dt = 60;
@@ -414,7 +429,7 @@ static void drawRadar() {
     if (x * x + y * y > R * R) continue;
     int px = CX + lroundf(x * k);
     int py = CY - lroundf(y * k);
-    drawPlane(px, py, local[i].hdg, C_PLANE);
+    drawPlane(px, py, local[i].hdg, altColor(local[i].altFt));
 
     int tw = spr.textWidth(local[i].id);
     int lx = px;
